@@ -20,7 +20,7 @@
     { title: 'Einstellungen', icon: 'sliders', href: '#/mehr', sub: function () { return 'Karten, Backup, Tarnmodus'; } }
   ];
 
-  var APP_VERSION = '1.5.1';
+  var APP_VERSION = '1.6.0';
   var MARK_COLORS = [
     { name: 'Gelb', hex: '#FFE600' }, { name: 'Orange', hex: '#FF8A00' }, { name: 'Pink', hex: '#FF3D9A' },
     { name: 'Grün', hex: '#37D67A' }, { name: 'Blau', hex: '#2AA9FF' }
@@ -55,7 +55,7 @@
   };
 
   var state = {
-    tarn: false, overlays: [], marks: [], draw: null, drawColor: MARK_COLORS[0].hex, tour: null, pos: null, watchId: null, map: null, lastBounds: null,
+    tarn: false, overlays: [], marks: [], zones: false, draw: null, drawColor: MARK_COLORS[0].hex, tour: null, pos: null, watchId: null, map: null, lastBounds: null,
     draft: null, pick: null, filter: 'Alle', search: '', fsearch: '', reveal: {},
     dl: null, reg: null, updateReady: false, recorder: null, inited: false
   };
@@ -391,18 +391,19 @@
         '<a class="map-btn" href="#/mehr" aria-label="Offline-Karten verwalten">' + icon('layers') + '</a>';
 
       var mainMode = state.mapMode === 'karte';
-      state.map.setMarks(mainMode && state.draw ? state.marks : []);
+      state.map.setMarks(mainMode && state.zones ? state.marks : []);
       state.map.setOverlays(Geo.OVERLAYS.filter(function (o) { return state.overlays.indexOf(o.id) >= 0; }));
       el.layers.innerHTML = Geo.OVERLAYS.map(function (o) {
         var on = state.overlays.indexOf(o.id) >= 0;
         return '<button class="map-chip' + (on ? ' on' : '') + '" aria-pressed="' + on + '" data-act="overlay" data-id="' + o.id + '">' + esc(o.title) + '</button>';
-      }).join('') + '<a class="map-chip" href="' + SNOW_URL + '" target="_blank" rel="noopener">Schnee</a>';
+      }).join('') + '<a class="map-chip" href="' + SNOW_URL + '" target="_blank" rel="noopener">Schnee</a>' +
+        (mainMode && !state.pick ? '<button class="map-chip' + (state.zones ? ' on' : '') + '" aria-pressed="' + state.zones + '" aria-label="Interessante Zonen" data-act="zones">Zonen</button>' : '');
 
       el.tools.innerHTML =
         '<button class="map-btn" data-act="zoom-in" aria-label="Hineinzoomen">' + icon('plus') + '</button>' +
         '<button class="map-btn" data-act="zoom-out" aria-label="Herauszoomen">' + icon('minus') + '</button>' +
         '<button class="map-btn' + (state.watchId != null ? ' on' : '') + '" data-act="locate" aria-label="Mein Standort">' + icon('locate') + '</button>' +
-        (mainMode && !state.pick ? '<button class="map-btn' + (state.draw ? ' on' : '') + '" data-act="draw-toggle" aria-pressed="' + !!state.draw + '" aria-label="Leuchtstift">' + icon('pen') + '</button>' : '');
+        (mainMode && !state.pick && state.zones ? '<button class="map-btn' + (state.draw ? ' on' : '') + '" data-act="draw-toggle" aria-pressed="' + !!state.draw + '" aria-label="Leuchtstift">' + icon('pen') + '</button>' : '');
 
       el.sheet.hidden = !kluftMode && !state.pick && !state.draw;
       if (state.draw) {
@@ -1132,6 +1133,12 @@
       el.light.innerHTML = '<img class="legend-big" src="' + esc(src) + '" alt="Legende Steilheit"><button class="square" data-act="light-close" aria-label="Schliessen">' + icon('close') + '</button>';
       el.light.hidden = false;
     },
+    zones: function () {
+      state.zones = !state.zones;
+      if (!state.zones) stopDraw();
+      else if (!state.marks.length) toast('Tippe auf den Stift, um Zonen zu markieren.');
+      DB.setMeta('zonesOn', state.zones).then(renderMap);
+    },
     'draw-toggle': function () {
       if (state.draw) stopDraw();
       else {
@@ -1521,11 +1528,12 @@
     if (!document.hidden && !el.mapView.hidden) renderMap();
   });
 
-  Promise.all([DB.meta('tarn', false), DB.meta('tour', null), DB.meta('overlays', []), DB.meta('marks', [])]).then(function (r) {
+  Promise.all([DB.meta('tarn', false), DB.meta('tour', null), DB.meta('overlays', []), DB.meta('marks', []), DB.meta('zonesOn', false)]).then(function (r) {
     state.tarn = r[0];
     state.tour = r[1];
     state.overlays = r[2];
     state.marks = r[3];
+    state.zones = r[4];
     initSW();
     route();
   }).catch(function () {
