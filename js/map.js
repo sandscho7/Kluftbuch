@@ -17,6 +17,7 @@ function TileMap(el, opts) {
   el.appendChild(markerLayer);
 
   var markers = [];
+  var overlays = [];
   var me = null;
 
   function size() { return { w: el.clientWidth, h: el.clientHeight }; }
@@ -53,6 +54,23 @@ function TileMap(el, opts) {
     return box;
   }
 
+  function overlayTile(o, z, x, y) {
+    var box = document.createElement('div');
+    box.className = 'tile over';
+    var img = document.createElement('img');
+    img.alt = '';
+    img.draggable = false;
+    var list = o.urls(z, x, y), i = 0;
+    img.onerror = function () {
+      i += 1;
+      if (i < list.length) img.src = list[i];
+      else img.style.visibility = 'hidden';
+    };
+    img.src = list[0];
+    box.appendChild(img);
+    return box;
+  }
+
   function render() {
     scheduled = false;
     var s = size();
@@ -73,11 +91,25 @@ function TileMap(el, opts) {
           tiles[key] = makeTile(base, x, y);
           tileLayer.appendChild(tiles[key]);
         }
-        tiles[key].style.transform = 'translate3d(' + (x * ts - ox) + 'px,' + (y * ts - oy) + 'px,0) scale(' + (scale * 1.004) + ')';
+        var tf = 'translate3d(' + (x * ts - ox) + 'px,' + (y * ts - oy) + 'px,0) scale(' + (scale * 1.004) + ')';
+        tiles[key].style.transform = tf;
+        for (var o = 0; o < overlays.length; o++) {
+          var ov = overlays[o];
+          if (!ov.tiles[key]) {
+            ov.tiles[key] = overlayTile(ov, base, x, y);
+            ov.el.appendChild(ov.tiles[key]);
+          }
+          ov.tiles[key].style.transform = tf;
+        }
       }
     }
     Object.keys(tiles).forEach(function (k) {
       if (!want[k]) { tileLayer.removeChild(tiles[k]); delete tiles[k]; }
+    });
+    overlays.forEach(function (ov) {
+      Object.keys(ov.tiles).forEach(function (k) {
+        if (!want[k]) { ov.el.removeChild(ov.tiles[k]); delete ov.tiles[k]; }
+      });
     });
     markers.forEach(function (m) {
       var p = screen(m.lat, m.lon);
@@ -171,6 +203,23 @@ function TileMap(el, opts) {
   }, { passive: false });
 
   this.refresh = schedule;
+  this.setOverlays = function (list) {
+    var ids = list.map(function (o) { return o.id; });
+    overlays = overlays.filter(function (ov) {
+      if (ids.indexOf(ov.id) >= 0) return true;
+      ov.el.remove();
+      return false;
+    });
+    list.forEach(function (o) {
+      if (overlays.some(function (ov) { return ov.id === o.id; })) return;
+      var d = document.createElement('div');
+      d.className = 'tile-layer';
+      d.style.opacity = o.opacity;
+      el.insertBefore(d, markerLayer);
+      overlays.push({ id: o.id, urls: o.urls, el: d, tiles: {} });
+    });
+    schedule();
+  };
   this.reloadTiles = function () {
     Object.keys(tiles).forEach(function (k) { tileLayer.removeChild(tiles[k]); delete tiles[k]; });
     schedule();

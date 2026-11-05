@@ -55,6 +55,29 @@ var Geo = (function () {
     return out;
   }
 
+  function wmsUrl(layer, z, x, y) {
+    var R = 20037508.342789, size = 2 * R / Math.pow(2, z);
+    var minx = -R + x * size, maxy = R - y * size;
+    return 'https://wms.geo.admin.ch/?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=' + layer +
+      '&STYLES=&CRS=EPSG:3857&BBOX=' + [minx, maxy - size, minx + size, maxy].join(',') +
+      '&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true&LANG=de';
+  }
+
+  // Kartenebenen für den Schnellzugriff. urls liefert die Quellen der Reihe nach.
+  var OVERLAYS = [
+    {
+      id: 'steilheit', title: 'Steilheit', opacity: 0.7,
+      urls: function (z, x, y) {
+        return ['https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.hangneigung-ueber_30/default/current/3857/' + z + '/' + x + '/' + y + '.png',
+          wmsUrl('ch.swisstopo.hangneigung-ueber_30', z, x, y)];
+      }
+    },
+    {
+      id: 'geologie', title: 'Geologie', opacity: 0.6,
+      urls: function (z, x, y) { return [wmsUrl('ch.swisstopo.geologie-geocover', z, x, y)]; }
+    }
+  ];
+
   var AREAS = [
     { id: 'binntal', name: 'Binntal', w: 8.13, s: 46.33, e: 8.30, n: 46.43 },
     { id: 'goms', name: 'Goms', w: 8.05, s: 46.40, e: 8.42, n: 46.58 },
@@ -75,6 +98,6 @@ var Geo = (function () {
   return {
     toLV95: toLV95, fmtLV95: fmtLV95, maskLV95: maskLV95, distance: distance,
     lon2x: lon2x, lat2y: lat2y, x2lon: x2lon, y2lat: y2lat,
-    tileUrl: tileUrl, tilesFor: tilesFor, AREAS: AREAS, areaAt: areaAt
+    tileUrl: tileUrl, tilesFor: tilesFor, AREAS: AREAS, OVERLAYS: OVERLAYS, wmsUrl: wmsUrl, areaAt: areaAt
   };
 })();

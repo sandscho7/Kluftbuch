@@ -20,6 +20,8 @@
     { title: 'Einstellungen', icon: 'sliders', href: '#/mehr', sub: function () { return 'Karten, Backup, Tarnmodus'; } }
   ];
 
+  var SNOW_URL = 'https://whiterisk.ch/de/conditions/snow-maps/snow_depth';
+
   var ICONS = {
     home: '<path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/>',
     cloud: '<path d="M7 18a4 4 0 0 1-.5-8 5.500 5.500 0 0 1 10.600-1.200A4.500 4.500 0 0 1 17 18H7z"/>',
@@ -45,14 +47,14 @@
   };
 
   var state = {
-    tarn: false, tour: null, pos: null, watchId: null, map: null, lastBounds: null,
+    tarn: false, overlays: [], tour: null, pos: null, watchId: null, map: null, lastBounds: null,
     draft: null, pick: null, filter: 'Alle', search: '', fsearch: '', reveal: {},
     dl: null, reg: null, updateReady: false, recorder: null, inited: false
   };
 
   var el = {
     screen: $('#screen'), mapView: $('#map-view'), tabs: $('#tabs'), top: $('#map-top'),
-    tools: $('#map-tools'), sheet: $('#map-sheet'), cross: $('#crosshair'), modal: $('#modal'),
+    tools: $('#map-tools'), layers: $('#map-layers'), sheet: $('#map-sheet'), cross: $('#crosshair'), modal: $('#modal'),
     light: $('#lightbox'), toast: $('#toast')
   };
 
@@ -242,6 +244,12 @@
         '<div class="map-title"><strong>' + esc(title) + '</strong><span>' + net + ' · ' + n + (n === 1 ? ' Gebiet' : ' Gebiete') + ' geladen</span></div>' +
         '<button class="map-btn' + (state.tarn ? ' on' : '') + '" data-act="tarn" aria-pressed="' + state.tarn + '" aria-label="Tarnmodus, Fundpunkte ausblenden">' + icon(state.tarn ? 'eyeoff' : 'eye') + '</button>' +
         '<a class="map-btn" href="#/mehr" aria-label="Offline-Karten verwalten">' + icon('layers') + '</a>';
+
+      state.map.setOverlays(Geo.OVERLAYS.filter(function (o) { return state.overlays.indexOf(o.id) >= 0; }));
+      el.layers.innerHTML = Geo.OVERLAYS.map(function (o) {
+        var on = state.overlays.indexOf(o.id) >= 0;
+        return '<button class="map-chip' + (on ? ' on' : '') + '" aria-pressed="' + on + '" data-act="overlay" data-id="' + o.id + '">' + esc(o.title) + '</button>';
+      }).join('') + '<a class="map-chip" href="' + SNOW_URL + '" target="_blank" rel="noopener">Schnee</a>';
 
       el.tools.innerHTML =
         '<button class="map-btn" data-act="zoom-in" aria-label="Hineinzoomen">' + icon('plus') + '</button>' +
@@ -951,6 +959,13 @@
       state.tarn = !state.tarn;
       DB.setMeta('tarn', state.tarn).then(route);
     },
+    overlay: function (n) {
+      var id = n.getAttribute('data-id');
+      var i = state.overlays.indexOf(id);
+      if (i >= 0) state.overlays.splice(i, 1); else state.overlays.push(id);
+      if (i < 0 && !navigator.onLine) toast('Diese Ebene braucht Internet.');
+      DB.setMeta('overlays', state.overlays).then(renderMap);
+    },
     'zoom-in': function () { state.map.zoomBy(1); },
     'zoom-out': function () { state.map.zoomBy(-1); },
     locate: function () {
@@ -1310,9 +1325,10 @@
     if (!document.hidden && !el.mapView.hidden) renderMap();
   });
 
-  Promise.all([DB.meta('tarn', false), DB.meta('tour', null)]).then(function (r) {
+  Promise.all([DB.meta('tarn', false), DB.meta('tour', null), DB.meta('overlays', [])]).then(function (r) {
     state.tarn = r[0];
     state.tour = r[1];
+    state.overlays = r[2];
     initSW();
     route();
   }).catch(function () {
