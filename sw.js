@@ -1,6 +1,6 @@
 // Bei jeder Änderung an der App VERSION erhöhen. Die Daten liegen in IndexedDB
 // und die Karten in TILE_CACHE, beides bleibt bei einem Update unangetastet.
-var VERSION = '1.2.0';
+var VERSION = '1.3.0';
 var APP_CACHE = 'kb-app-' + VERSION;
 var TILE_CACHE = 'kb-tiles-v1';
 var SHELL = [
@@ -34,6 +34,19 @@ self.addEventListener('fetch', function (e) {
     e.respondWith(caches.open(TILE_CACHE).then(function (c) {
       return c.match(e.request.url).then(function (hit) {
         return hit || fetch(e.request);
+      });
+    }));
+    return;
+  }
+
+  // Legendenbilder einmal laden und danach auch offline zeigen.
+  if (url.hostname === 'api3.geo.admin.ch' && url.pathname.indexOf('/static/images/legends/') === 0) {
+    e.respondWith(caches.open(TILE_CACHE).then(function (c) {
+      return c.match(e.request.url).then(function (hit) {
+        return hit || fetch(e.request).then(function (res) {
+          c.put(e.request.url, res.clone());
+          return res;
+        });
       });
     }));
     return;

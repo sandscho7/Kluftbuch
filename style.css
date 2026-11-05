@@ -187,3 +187,14 @@ body:not(.with-tabs) #map-sheet { padding-bottom: calc(16px + env(safe-area-inse
 #map-layers { position: absolute; left: 12px; right: 76px; top: calc(76px + env(safe-area-inset-top)); display: flex; flex-wrap: wrap; gap: 6px; z-index: 4; }
 .map-chip { min-height: 44px; padding: 0 12px; border-radius: 22px; background: var(--card); color: var(--ink); display: inline-flex; align-items: center; font-size: 14px; font-weight: 600; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
 .map-chip.on { background: var(--ink); color: #FFF; }
+#map-legend { position: absolute; left: 12px; z-index: 4; padding: 4px; max-width: 172px; background: var(--card); border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+#map-legend button { display: block; padding: 0; }
+#map-legend img { display: block; max-width: 164px; max-height: 170px; object-fit: contain; }
+#map-legend p { padding: 6px; }
+.legend-big { background: #FFF; width: 100%; }
+.tap-mark { position: absolute; left: -11px; top: -11px; width: 22px; height: 22px; pointer-events: none;
+  background: linear-gradient(var(--rust), var(--rust)) center/3px 100% no-repeat, linear-gradient(var(--rust), var(--rust)) center/100% 3px no-repeat; }
+.geo-item { margin: 0; padding: 10px 12px; background: var(--ground); border-radius: 10px; }
+.geo-item dt { font-size: 12px; color: var(--muted2); }
+.geo-item dd { margin: 0 0 8px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.geo-item dd:last-child { margin-bottom: 0; }

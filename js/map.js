@@ -6,7 +6,7 @@ function TileMap(el, opts) {
   var cx = Geo.lon2x(8.2), cy = Geo.lat2y(46.38), zoom = 12;
   var tiles = {};
   var pointers = {};
-  var pinch = null, moved = false, lastTap = 0;
+  var pinch = null, moved = false, lastTap = 0, tapTimer = null;
   var scheduled = false;
 
   var tileLayer = document.createElement('div');
@@ -19,6 +19,7 @@ function TileMap(el, opts) {
   var markers = [];
   var overlays = [];
   var me = null;
+  var tapMark = null;
 
   function size() { return { w: el.clientWidth, h: el.clientHeight }; }
   function worldPx() { return TS * Math.pow(2, zoom); }
@@ -119,6 +120,10 @@ function TileMap(el, opts) {
       var p = screen(me.lat, me.lon);
       me.el.style.transform = 'translate3d(' + p.x + 'px,' + p.y + 'px,0)';
     }
+    if (tapMark) {
+      var t = screen(tapMark.lat, tapMark.lon);
+      tapMark.el.style.transform = 'translate3d(' + t.x + 'px,' + t.y + 'px,0)';
+    }
     if (opts.onMove) opts.onMove();
   }
 
@@ -186,11 +191,21 @@ function TileMap(el, opts) {
     if (pts().length < 2) pinch = null;
     if (!moved && e.type === 'pointerup') {
       var now = Date.now();
+      var r = el.getBoundingClientRect();
+      var tx = e.clientX - r.left, ty = e.clientY - r.top;
       if (now - lastTap < 320) {
-        var r = el.getBoundingClientRect();
-        zoomAt(Math.round(zoom) + 1, e.clientX - r.left, e.clientY - r.top);
+        clearTimeout(tapTimer);
+        zoomAt(Math.round(zoom) + 1, tx, ty);
         lastTap = 0;
-      } else lastTap = now;
+      } else {
+        lastTap = now;
+        if (opts.onTap) {
+          tapTimer = setTimeout(function () {
+            var s = size(), w = worldPx();
+            opts.onTap(Geo.y2lat(cy + (ty - s.h / 2) / w), Geo.x2lon(cx + (tx - s.w / 2) / w));
+          }, 330);
+        }
+      }
     }
   }
   el.addEventListener('pointerup', up);
@@ -254,6 +269,20 @@ function TileMap(el, opts) {
       markerLayer.appendChild(b);
       return { lat: m.lat, lon: m.lon, el: b };
     });
+    schedule();
+  };
+  this.setTap = function (lat, lon) {
+    if (lat == null) {
+      if (tapMark) { tapMark.el.remove(); tapMark = null; }
+      return;
+    }
+    if (!tapMark) {
+      var d = document.createElement('div');
+      d.className = 'tap-mark';
+      markerLayer.appendChild(d);
+      tapMark = { el: d };
+    }
+    tapMark.lat = lat; tapMark.lon = lon;
     schedule();
   };
   this.setMe = function (lat, lon) {

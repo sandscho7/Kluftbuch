@@ -20,6 +20,8 @@
     { title: 'Einstellungen', icon: 'sliders', href: '#/mehr', sub: function () { return 'Karten, Backup, Tarnmodus'; } }
   ];
 
+  var GEO_API = 'https://api3.geo.admin.ch/rest/services/ech/MapServer/';
+  var LEGEND = 'https://api3.geo.admin.ch/static/images/legends/ch.swisstopo.hangneigung-ueber_30_';
   var SNOW_URL = 'https://whiterisk.ch/de/conditions/snow-maps/snow_depth';
 
   var ICONS = {
@@ -54,7 +56,7 @@
 
   var el = {
     screen: $('#screen'), mapView: $('#map-view'), tabs: $('#tabs'), top: $('#map-top'),
-    tools: $('#map-tools'), layers: $('#map-layers'), sheet: $('#map-sheet'), cross: $('#crosshair'), modal: $('#modal'),
+    tools: $('#map-tools'), layers: $('#map-layers'), legend: $('#map-legend'), sheet: $('#map-sheet'), cross: $('#crosshair'), modal: $('#modal'),
     light: $('#lightbox'), toast: $('#toast')
   };
 
@@ -211,10 +213,100 @@
     state.map = new TileMap($('#map'), {
       onMove: function () {
         if (!el.mapView.hidden) state.lastBounds = state.map.bounds();
+      },
+      onTap: function (lat, lon) {
+        if (!state.pick && state.overlays.indexOf('geologie') >= 0) identifyGeology(lat, lon);
       }
     });
     DB.meta('mapView', null).then(function (v) {
       if (v) state.map.setView(v.lat, v.lon, v.zoom);
+    });
+  }
+
+  function renderLegend() {
+    var on = state.overlays.indexOf('steilheit') >= 0;
+    if (!on) { el.legend.hidden = true; el.legend.innerHTML = ''; return; }
+    if (!el.legend.firstChild) {
+      el.legend.innerHTML = '<button type="button" data-act="legend-big" aria-label="Legende Steilheit vergrössern"><img alt="Legende Steilheit"></button>';
+      var img = el.legend.querySelector('img');
+      img.onerror = function () {
+        if (img.src.indexOf('_de.png') > 0) img.src = LEGEND + 'en.png';
+        else el.legend.innerHTML = '<p class="small">Legende braucht einmal Internet.</p>';
+      };
+      img.src = LEGEND + 'de.png';
+    }
+    el.legend.hidden = false;
+    el.legend.style.bottom = (el.sheet.offsetHeight + 8) + 'px';
+  }
+
+  function popupRows(html) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var rows = [];
+    doc.querySelectorAll('tr').forEach(function (tr) {
+      var c = tr.querySelectorAll('th, td');
+      if (c.length < 2) return;
+      var k = c[0].textContent.trim(), v = c[1].textContent.trim();
+      if (k && v && v !== '-') rows.push([k, v]);
+    });
+    return rows;
+  }
+
+  function attrRows(a) {
+    return Object.keys(a || {}).filter(function (k) {
+      return typeof a[k] === 'string' && a[k].trim() && k !== 'label';
+    }).map(function (k) { return [k.replace(/_/g, ' '), a[k]]; });
+  }
+
+  function geologyDialog(body) {
+    dialog('<h2>Geologie an diesem Punkt</h2>' + body + '<button class="btn wide" id="m-no">Schliessen</button>');
+    $('#m-no').onclick = function () {
+      state.geoRun = (state.geoRun || 0) + 1;
+      closeDialog();
+      state.map.setTap(null);
+    };
+  }
+
+  function identifyGeology(lat, lon) {
+    if (!navigator.onLine) { toast('Die Gesteinsabfrage braucht Internet.'); return; }
+    var run = state.geoRun = (state.geoRun || 0) + 1;
+    state.map.setTap(lat, lon);
+    geologyDialog('<p class="muted">Gestein wird gesucht …</p>');
+    var p = Geo.toLV95(lat, lon), b = state.map.bounds();
+    var a = Geo.toLV95(b.s, b.w), c = Geo.toLV95(b.n, b.e);
+    var box = $('#map');
+    var view = 'mapExtent=' + [a.e, a.n, c.e, c.n].map(Math.round).join(',') +
+      '&imageDisplay=' + box.clientWidth + ',' + box.clientHeight + ',96';
+    var url = GEO_API + 'identify?geometry=' + Math.round(p.e) + ',' + Math.round(p.n) +
+      '&geometryType=esriGeometryPoint&sr=2056&tolerance=6&' + view +
+      '&layers=all:ch.swisstopo.geologie-geocover&returnGeometry=false&lang=de&limit=6';
+    fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('identify');
+      return r.json();
+    }).then(function (data) {
+      return Promise.all((data.results || []).map(function (f) {
+        var id = f.featureId != null ? f.featureId : f.id;
+        var pop = GEO_API + encodeURIComponent(f.layerBodId) + '/' + encodeURIComponent(id) + '/htmlPopup?lang=de&sr=2056&' + view;
+        return fetch(pop).then(function (r) { return r.ok ? r.text() : ''; }).catch(function () { return ''; }).then(function (html) {
+          var rows = html ? popupRows(html) : [];
+          return rows.length ? rows : attrRows(f.attributes);
+        });
+      }));
+    }).then(function (list) {
+      if (state.geoRun !== run) return;
+      var seen = {};
+      var items = list.filter(function (rows) {
+        var k = JSON.stringify(rows);
+        if (!rows.length || seen[k]) return false;
+        seen[k] = 1;
+        return true;
+      });
+      geologyDialog(items.length ? items.map(function (rows) {
+        return '<dl class="geo-item">' + rows.map(function (r) {
+          return '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>';
+        }).join('') + '</dl>';
+      }).join('') + '<p class="muted small">Quelle: GeoCover, swisstopo</p>' : '<p>Für diesen Punkt sind keine geologischen Angaben vorhanden.</p>');
+    }).catch(function () {
+      if (state.geoRun === run) geologyDialog('<p>Die Abfrage hat nicht geklappt. Prüfe den Empfang und versuche es nochmals.</p>');
     });
   }
 
@@ -261,6 +353,7 @@
       } else {
         el.sheet.innerHTML = sheetHtml(visible);
       }
+      renderLegend();
       state.map.refresh();
     });
   }
@@ -964,7 +1057,13 @@
       var i = state.overlays.indexOf(id);
       if (i >= 0) state.overlays.splice(i, 1); else state.overlays.push(id);
       if (i < 0 && !navigator.onLine) toast('Diese Ebene braucht Internet.');
+      else if (i < 0 && id === 'geologie') toast('Tippe auf die Karte, um das Gestein zu sehen.');
       DB.setMeta('overlays', state.overlays).then(renderMap);
+    },
+    'legend-big': function (n) {
+      var src = n.querySelector('img').src;
+      el.light.innerHTML = '<img class="legend-big" src="' + esc(src) + '" alt="Legende Steilheit"><button class="square" data-act="light-close" aria-label="Schliessen">' + icon('close') + '</button>';
+      el.light.hidden = false;
     },
     'zoom-in': function () { state.map.zoomBy(1); },
     'zoom-out': function () { state.map.zoomBy(-1); },
