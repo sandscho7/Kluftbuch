@@ -177,3 +177,9 @@ audio { width: 100%; height: 44px; }
 #screen { position: relative; }
 body:not(.with-tabs) #map-view { bottom: 0; }
 body:not(.with-tabs) #map-sheet { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+.home-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.home-tile { min-height: 124px; padding: 14px; background: var(--card); border-radius: 14px; display: flex; flex-direction: column; gap: 2px; }
+.home-tile svg { margin-bottom: auto; }
+.home-t { font-size: 18px; font-weight: 700; line-height: 23px; margin-top: 12px; }
+.home-s { font-size: 13px; line-height: 18px; color: var(--muted); }
+.home-tile.soon { background: transparent; border: 2px dashed var(--stone); color: var(--muted); }

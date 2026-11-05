@@ -10,7 +10,20 @@
   var LAGE = ['Decke', 'Wand', 'Boden', 'Sand'];
   var ZUSTAND = ['Intakt', 'Bestossen', 'Bruch'];
 
+  // Startseite: Für eine neue Funktion hier eine Kachel ergänzen.
+  // Ohne href erscheint die Kachel als «Bald». sub bekommt die aktuellen Zahlen.
+  var HOME = [
+    { title: 'Karte', icon: 'map', href: '#/karte', sub: function (c) { return c.areas + (c.areas === 1 ? ' Gebiet' : ' Gebiete') + ' offline'; } },
+    { title: 'Kluftbuch', icon: 'book', href: '#/kluefte', sub: function (c) { return c.klufte + (c.klufte === 1 ? ' Kluft' : ' Klüfte'); } },
+    { title: 'Funde', icon: 'gem', href: '#/funde', sub: function (c) { return c.funde + (c.funde === 1 ? ' Fund' : ' Funde'); } },
+    { title: 'Wetter', icon: 'cloud' },
+    { title: 'Einstellungen', icon: 'sliders', href: '#/mehr', sub: function () { return 'Karten, Backup, Tarnmodus'; } }
+  ];
+
   var ICONS = {
+    home: '<path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/>',
+    cloud: '<path d="M7 18a4 4 0 0 1-.5-8 5.500 5.500 0 0 1 10.600-1.200A4.500 4.500 0 0 1 17 18H7z"/>',
+    sliders: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
     map: '<path d="M3 20l6-12 4 7 2-3 6 8H3z"/>',
     book: '<path d="M5 3h12a2 2 0 0 1 2 2v16H7a2 2 0 0 1-2-2V3z"/><path d="M5 17h14"/><path d="M12 6l-2 4 3 1-2 3"/>',
     gem: '<path d="M7 4h10l4 6-9 11L3 10l4-6z"/><path d="M3 10h18M9 10l3 11 3-11"/>',
@@ -400,10 +413,11 @@
 
   function runGps() {
     var d = state.draft;
+    var run = d._gpsRun = (d._gpsRun || 0) + 1;
     d.gpsBusy = true; d.gpsErr = null;
     refreshPos();
     locate(function (p) {
-      if (state.draft !== d) return;
+      if (state.draft !== d || d._gpsRun !== run) return;
       d.gpsBusy = false; d.lat = p.lat; d.lon = p.lon; d.acc = p.acc; d.gps = true;
       if (p.alt != null) d.alt = Math.round(p.alt);
       if (!d.gebiet) d.gebiet = Geo.areaAt(p.lat, p.lon);
@@ -411,10 +425,22 @@
       var g = $('[data-bind=gebiet]'); if (g) g.value = d.gebiet || '';
       refreshPos();
     }, function (msg) {
-      if (state.draft !== d) return;
+      if (state.draft !== d || d._gpsRun !== run) return;
       d.gpsBusy = false; d.gpsErr = msg;
       refreshPos();
     });
+  }
+
+  // Beim Nachtragen ist der aktuelle Standort nicht der Fundort.
+  function clearAutoPos() {
+    var d = state.draft;
+    d._autoPos = false;
+    d._gpsRun = (d._gpsRun || 0) + 1;
+    d.gpsBusy = false; d.lat = null; d.lon = null; d.acc = null; d.gps = false; d.alt = null; d.gebiet = '';
+    d.gpsErr = 'Nachtrag: Punkt auf der Karte wählen';
+    var a = $('[data-bind=alt]'); if (a) a.value = '';
+    var g = $('[data-bind=gebiet]'); if (g) g.value = '';
+    refreshPos();
   }
 
   function renderKluftForm() {
@@ -429,8 +455,10 @@
       '<button type="button" class="big-btn" data-act="voice" id="voice-btn">' + icon('mic', 26) + '<span>Sprachnotiz</span></button></div>' +
       '<div id="media">' + mediaList(d) + '</div>' +
       input('name', 'Name') +
+      input('datum', 'Entdeckt am', 'date') +
       group('status', 'Status', STATUS, false, false) +
       group('anzeichen', 'Anzeichen', ANZEICHEN, true, true) +
+      group('mineralien', 'Mineralien', MINERALE, true, true) +
       group('gestein', 'Gestein', GESTEIN, false, true) +
       group('expo', 'Exposition', EXPO, false, false) +
       textarea('befund', 'Befund') +
@@ -449,7 +477,7 @@
 
   function startNew() {
     return Promise.resolve({
-      _route: 'neu', photos: [], voice: [], anzeichen: [], status: 'Vermutet',
+      _route: 'neu', photos: [], voice: [], anzeichen: [], mineralien: [], status: 'Vermutet', datum: today(),
       name: '', befund: '', _newMedia: []
     });
   }
@@ -463,14 +491,23 @@
         id: d.id || DB.uid(), nr: nr, name: (d.name || '').trim(), status: d.status,
         lat: d.lat == null ? null : d.lat, lon: d.lon == null ? null : d.lon, acc: d.acc || null,
         alt: num(d.alt), tiefe: num(d.tiefe), expo: d.expo || '', gestein: d.gestein || '',
-        anzeichen: d.anzeichen || [], befund: d.befund || '', gebiet: (d.gebiet || '').trim(),
+        anzeichen: d.anzeichen || [], mineralien: d.mineralien || [], datum: d.datum || today(), befund: d.befund || '', gebiet: (d.gebiet || '').trim(),
         zustieg: d.zustieg || '', bewGemeinde: d.bewGemeinde || '', bewNr: d.bewNr || '', bewBis: d.bewBis || '',
         photos: d.photos || [], voice: d.voice || [], fundCounter: d.fundCounter || 0,
         createdAt: d.createdAt || now(), updatedAt: now()
       };
       return DB.put('klufte', k).then(function () {
-        if (!isNew) return k;
-        return DB.put('begehungen', { id: DB.uid(), kluftId: k.id, datum: today(), notiz: 'Erfasst', updatedAt: now() }).then(function () { return k; });
+        if (isNew) {
+          return DB.put('begehungen', { id: DB.uid(), kluftId: k.id, datum: k.datum, notiz: 'Erfasst', updatedAt: now() }).then(function () { return k; });
+        }
+        if (d._origDatum === k.datum) return k;
+        return DB.byKluft('begehungen', k.id).then(function (list) {
+          var first = list.filter(function (b) { return b.notiz === 'Erfasst'; })[0];
+          if (!first) return k;
+          first.datum = k.datum;
+          first.updatedAt = now();
+          return DB.put('begehungen', first).then(function () { return k; });
+        });
       });
     }).then(function (k) {
       askPersist();
@@ -508,11 +545,12 @@
         '<div class="page stack-l">' +
         '<div><div class="mono accent-text strong">' + esc(k.nr) + ' · ' + esc(k.status) + '</div>' +
         '<h1>' + esc(k.name || 'Kluft ' + k.nr) + '</h1>' +
-        '<div class="muted">' + esc(k.gebiet || 'Ohne Gebiet') + ' · erfasst ' + fmtDate(k.createdAt) + '</div></div>' +
+        '<div class="muted">' + esc(k.gebiet || 'Ohne Gebiet') + ' · entdeckt ' + fmtDate(k.datum || k.createdAt) + '</div></div>' +
         '<div class="grid3 gap8">' + cell('Höhe', fmtM(k.alt)) + cell('Exposition', k.expo) + cell('Tiefe', k.tiefe != null ? k.tiefe + ' m' : '') +
         cell('Gestein', k.gestein, true) + cell('Funde', String(funde.length)) + '</div>' +
         coords +
         ((k.anzeichen || []).length ? '<section><h2>Anzeichen</h2><p>' + esc(k.anzeichen.join(', ')) + '</p></section>' : '') +
+        ((k.mineralien || []).length ? '<section><h2>Mineralien</h2><p>' + esc(k.mineralien.join(', ')) + '</p></section>' : '') +
         (k.befund ? '<section><h2>Befund</h2><p class="pre">' + esc(k.befund) + '</p></section>' : '') +
         (k.zustieg ? '<section><h2>Zustieg</h2><p class="pre">' + esc(k.zustieg) + '</p></section>' : '') +
         ((k.voice || []).length ? '<section><h2>Sprachnotizen</h2>' + k.voice.map(function (v) { return '<audio controls data-media="' + v + '"></audio>'; }).join('') + '</section>' : '') +
@@ -595,6 +633,22 @@
 
   /* Listen ----------------------------------------------------------- */
 
+  function renderStart() {
+    return Promise.all([DB.all('klufte'), DB.all('funde'), DB.meta('areas', []), DB.meta('lastBackup', null)]).then(function (r) {
+      var c = { klufte: r[0].length, funde: r[1].length, areas: r[2].length };
+      var last = r[3];
+      var stale = c.klufte && (!last || Date.now() - new Date(last) > 30 * 864e5);
+      el.screen.innerHTML = '<div class="page"><h1 class="big">Strahler</h1>' +
+        (stale ? '<a class="warn" href="#/mehr">' + (last ? 'Letztes Backup ist über 30 Tage alt.' : 'Noch kein Backup gemacht.') + ' Jetzt sichern</a>' : '') +
+        '<div class="home-grid">' + HOME.map(function (t) {
+          if (!t.href) {
+            return '<div class="home-tile soon">' + icon(t.icon, 30) + '<span class="home-t">' + esc(t.title) + '</span><span class="home-s">Bald</span></div>';
+          }
+          return '<a class="home-tile" href="' + t.href + '">' + icon(t.icon, 30) + '<span class="home-t">' + esc(t.title) + '</span><span class="home-s">' + esc(t.sub(c)) + '</span></a>';
+        }).join('') + '</div></div>';
+    });
+  }
+
   function renderKluefte() {
     return Promise.all([DB.all('klufte'), DB.all('funde'), DB.meta('lastBackup', null)]).then(function (r) {
       var all = r[0], funde = r[1], last = r[2];
@@ -603,6 +657,9 @@
       funde.forEach(function (f) {
         counts[f.kluftId] = (counts[f.kluftId] || 0) + 1;
         mineral[f.kluftId] = (mineral[f.kluftId] || []).concat(f.mineralien || []);
+      });
+      all.forEach(function (k) {
+        mineral[k.id] = (k.mineralien || []).concat(mineral[k.id] || []);
       });
       var list = all.filter(function (k) {
         if (state.filter !== 'Alle' && k.status !== state.filter) return false;
@@ -677,7 +734,7 @@
       var standalone = window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
       var byId = {};
       areas.forEach(function (a) { byId[a.id] = a; });
-      el.screen.innerHTML = '<div class="page stack-l"><h1 class="big">Mehr</h1>' +
+      el.screen.innerHTML = '<div class="page stack-l"><h1 class="big">Einstellungen</h1>' +
         (standalone ? '' : '<div class="warn">Für Offline-Nutzung: in Safari Teilen antippen und «Zum Home-Bildschirm» wählen.</div>') +
         '<section><h2>Offline-Karten</h2><p class="muted small">Im WLAN laden. Die Kartendaten stammen von swisstopo.</p>' +
         '<div id="dl"></div><div class="list-card">' +
@@ -938,7 +995,7 @@
         refreshGroup(f, g[0], g[1], g[2], g[3]);
       });
     },
-    gps: runGps,
+    gps: function () { state.draft._autoPos = false; runGps(); },
     pick: function () {
       var d = state.draft;
       state.pick = { back: location.hash };
@@ -953,7 +1010,8 @@
     'pick-ok': function () {
       var c = state.map.center();
       var d = state.draft;
-      d.lat = c.lat; d.lon = c.lon; d.acc = null; d.gps = false; d.gpsErr = null;
+      d.lat = c.lat; d.lon = c.lon; d.acc = null; d.gps = false; d.gpsErr = null; d._autoPos = false;
+      d._gpsRun = (d._gpsRun || 0) + 1; d.gpsBusy = false;
       if (!d.gebiet) d.gebiet = Geo.areaAt(c.lat, c.lon);
       var b = state.pick.back;
       state.pick = null;
@@ -1016,7 +1074,7 @@
       Promise.all((d._newMedia || []).map(function (id) { return DB.del('media', id); })).then(function () {
         if (d.id && d._route.indexOf('bearbeiten') === 0) location.replace('#/kluft/' + d.id);
         else if (d.kluftId) location.replace('#/kluft/' + d.kluftId);
-        else location.replace('#/karte');
+        else location.replace('#/start');
       });
     },
     'save-kluft': function () {
@@ -1152,7 +1210,10 @@
 
   document.addEventListener('input', function (e) {
     var name = e.target.getAttribute && e.target.getAttribute('data-bind');
-    if (name && state.draft) state.draft[name] = e.target.value;
+    if (name && state.draft) {
+      state.draft[name] = e.target.value;
+      if (name === 'datum' && state.draft._autoPos && e.target.value !== today()) clearAutoPos();
+    }
   });
 
   /* Navigation ------------------------------------------------------- */
@@ -1161,16 +1222,16 @@
     var t = function (href, key, ic, label) {
       return '<a href="' + href + '"' + (active === key ? ' class="on" aria-current="page"' : '') + '>' + icon(ic) + '<span>' + label + '</span></a>';
     };
-    el.tabs.innerHTML = t('#/karte', 'karte', 'map', 'Karte') + t('#/kluefte', 'kluefte', 'book', 'Klüfte') +
+    el.tabs.innerHTML = t('#/start', 'start', 'home', 'Start') + t('#/karte', 'karte', 'map', 'Karte') +
       '<a href="#/neu" class="add" aria-label="Neue Kluft erfassen">' + icon('plus', 28) + '</a>' +
-      t('#/funde', 'funde', 'gem', 'Funde') + t('#/mehr', 'mehr', 'more', 'Mehr');
+      t('#/kluefte', 'kluefte', 'book', 'Klüfte') + t('#/funde', 'funde', 'gem', 'Funde');
   }
 
   function route() {
     if (el.modal.hidden === false) closeDialog();
-    var path = (location.hash || '#/karte').replace(/^#\/?/, '');
+    var path = (location.hash || '#/start').replace(/^#\/?/, '');
     var p = path.split('/');
-    var r = p[0] || 'karte';
+    var r = p[0] || 'start';
     var isMap = r === 'karte';
 
     if (!isMap && r !== 'neu' && r !== 'bearbeiten' && r !== 'fund' && state.draft && !state.pick) state.draft = null;
@@ -1188,6 +1249,7 @@
     if (!isMap) window.scrollTo(0, 0);
 
     if (isMap) return renderMap();
+    if (r === 'start') return renderStart();
     if (r === 'kluefte') return renderKluefte();
     if (r === 'funde') return renderFunde();
     if (r === 'mehr') return renderMehr();
@@ -1196,6 +1258,7 @@
       if (state.draft && state.draft._route === 'neu') { renderKluftForm(); return null; }
       return startNew().then(function (d) {
         state.draft = d;
+        d._autoPos = true;
         renderKluftForm();
         runGps();
       });
@@ -1206,7 +1269,8 @@
         if (!k) { location.replace('#/kluefte'); return; }
         state.draft = Object.assign({}, k, {
           _route: path, _newMedia: [], photos: (k.photos || []).slice(), voice: (k.voice || []).slice(),
-          anzeichen: (k.anzeichen || []).slice(), gps: k.acc != null
+          anzeichen: (k.anzeichen || []).slice(), mineralien: (k.mineralien || []).slice(), gps: k.acc != null,
+          datum: k.datum || String(k.createdAt).slice(0, 10), _origDatum: k.datum || String(k.createdAt).slice(0, 10)
         });
         renderKluftForm();
       });
@@ -1235,7 +1299,7 @@
         });
       });
     }
-    location.replace('#/karte');
+    location.replace('#/start');
     return null;
   }
 

@@ -1,6 +1,6 @@
 // Bei jeder Änderung an der App VERSION erhöhen. Die Daten liegen in IndexedDB
 // und die Karten in TILE_CACHE, beides bleibt bei einem Update unangetastet.
-var VERSION = '1.0.0';
+var VERSION = '1.1.0';
 var APP_CACHE = 'kb-app-' + VERSION;
 var TILE_CACHE = 'kb-tiles-v1';
 var SHELL = [
