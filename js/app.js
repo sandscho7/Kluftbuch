@@ -13,13 +13,14 @@
   // Startseite: Für eine neue Funktion hier eine Kachel ergänzen.
   // Ohne href erscheint die Kachel als «Bald». sub bekommt die aktuellen Zahlen.
   var HOME = [
-    { title: 'Karte', icon: 'map', href: '#/karte', sub: function (c) { return c.areas + (c.areas === 1 ? ' Gebiet' : ' Gebiete') + ' offline'; } },
+    { title: 'Karte', icon: 'map', href: '#/karte', sub: function (c) { return 'Orientierung · ' + c.areas + (c.areas === 1 ? ' Gebiet' : ' Gebiete') + ' offline'; } },
     { title: 'Kluftbuch', icon: 'book', href: '#/kluefte', sub: function (c) { return c.klufte + (c.klufte === 1 ? ' Kluft' : ' Klüfte'); } },
     { title: 'Funde', icon: 'gem', href: '#/funde', sub: function (c) { return c.funde + (c.funde === 1 ? ' Fund' : ' Funde'); } },
     { title: 'Wetter', icon: 'cloud' },
     { title: 'Einstellungen', icon: 'sliders', href: '#/mehr', sub: function () { return 'Karten, Backup, Tarnmodus'; } }
   ];
 
+  var APP_VERSION = '1.4.0';
   var GEO_API = 'https://api3.geo.admin.ch/rest/services/ech/MapServer/';
   var LEGEND = 'https://api3.geo.admin.ch/static/images/legends/ch.swisstopo.hangneigung-ueber_30_';
   var SNOW_URL = 'https://whiterisk.ch/de/conditions/snow-maps/snow_depth';
@@ -236,7 +237,7 @@
       img.src = LEGEND + 'de.png';
     }
     el.legend.hidden = false;
-    el.legend.style.bottom = (el.sheet.offsetHeight + 8) + 'px';
+    el.legend.style.bottom = (el.sheet.hidden ? 12 : el.sheet.offsetHeight + 8) + 'px';
   }
 
   function popupRows(html) {
@@ -266,6 +267,20 @@
     };
   }
 
+  // Ausweichweg, falls der Dienst eine direkte Abfrage aus der App nicht erlaubt.
+  function jsonp(url) {
+    return new Promise(function (res, rej) {
+      var name = 'kbGeo' + Date.now();
+      var s = document.createElement('script');
+      var done = function () { delete window[name]; s.remove(); };
+      var timer = setTimeout(function () { done(); rej(new Error('timeout')); }, 15000);
+      window[name] = function (data) { clearTimeout(timer); done(); res(data); };
+      s.onerror = function () { clearTimeout(timer); done(); rej(new Error('jsonp')); };
+      s.src = url + '&callback=' + name;
+      document.body.appendChild(s);
+    });
+  }
+
   function identifyGeology(lat, lon) {
     if (!navigator.onLine) { toast('Die Gesteinsabfrage braucht Internet.'); return; }
     var run = state.geoRun = (state.geoRun || 0) + 1;
@@ -282,7 +297,7 @@
     fetch(url).then(function (r) {
       if (!r.ok) throw new Error('identify');
       return r.json();
-    }).then(function (data) {
+    }).catch(function () { return jsonp(url); }).then(function (data) {
       return Promise.all((data.results || []).map(function (f) {
         var id = f.featureId != null ? f.featureId : f.id;
         var pop = GEO_API + encodeURIComponent(f.layerBodId) + '/' + encodeURIComponent(id) + '/htmlPopup?lang=de&sr=2056&' + view;
@@ -318,7 +333,8 @@
     return Promise.all([DB.all('klufte'), DB.meta('areas', [])]).then(function (r) {
       var klufte = r[0], areas = r[1];
       var visible = klufte.filter(function (k) { return k.lat != null; });
-      state.map.setMarkers(state.tarn || state.pick ? [] : visible.map(function (k) {
+      var kluftMode = state.mapMode === 'kluftkarte' && !state.pick;
+      state.map.setMarkers(!kluftMode || state.tarn ? [] : visible.map(function (k) {
         return {
           lat: k.lat, lon: k.lon, kind: statusKind(k.status),
           label: 'Kluft ' + k.nr + ' öffnen, ' + k.status,
@@ -328,13 +344,13 @@
       state.map.setMe(state.pos ? state.pos.lat : null, state.pos ? state.pos.lon : null);
 
       var c = state.map.center();
-      var title = Geo.areaAt(c.lat, c.lon) || 'Karte';
+      var title = kluftMode ? 'Kluftkarte' : Geo.areaAt(c.lat, c.lon) || 'Karte';
       var net = navigator.onLine ? 'Online' : 'Offline';
       var n = areas.length;
       el.top.innerHTML = state.pick ?
         '<div class="map-title"><strong>Punkt wählen</strong><span>Karte unter das Kreuz schieben</span></div>' :
         '<div class="map-title"><strong>' + esc(title) + '</strong><span>' + net + ' · ' + n + (n === 1 ? ' Gebiet' : ' Gebiete') + ' geladen</span></div>' +
-        '<button class="map-btn' + (state.tarn ? ' on' : '') + '" data-act="tarn" aria-pressed="' + state.tarn + '" aria-label="Tarnmodus, Fundpunkte ausblenden">' + icon(state.tarn ? 'eyeoff' : 'eye') + '</button>' +
+        (kluftMode ? '<button class="map-btn' + (state.tarn ? ' on' : '') + '" data-act="tarn" aria-pressed="' + state.tarn + '" aria-label="Tarnmodus, Fundpunkte ausblenden">' + icon(state.tarn ? 'eyeoff' : 'eye') + '</button>' : '') +
         '<a class="map-btn" href="#/mehr" aria-label="Offline-Karten verwalten">' + icon('layers') + '</a>';
 
       state.map.setOverlays(Geo.OVERLAYS.filter(function (o) { return state.overlays.indexOf(o.id) >= 0; }));
@@ -348,7 +364,10 @@
         '<button class="map-btn" data-act="zoom-out" aria-label="Herauszoomen">' + icon('minus') + '</button>' +
         '<button class="map-btn' + (state.watchId != null ? ' on' : '') + '" data-act="locate" aria-label="Mein Standort">' + icon('locate') + '</button>';
 
-      if (state.pick) {
+      el.sheet.hidden = !kluftMode && !state.pick;
+      if (!kluftMode && !state.pick) {
+        el.sheet.innerHTML = '';
+      } else if (state.pick) {
         el.sheet.innerHTML = '<div class="row2"><button class="btn" data-act="pick-cancel">Abbrechen</button><button class="btn primary" data-act="pick-ok">Punkt setzen</button></div>';
       } else {
         el.sheet.innerHTML = sheetHtml(visible);
@@ -746,7 +765,7 @@
             return '<div class="home-tile soon">' + icon(t.icon, 30) + '<span class="home-t">' + esc(t.title) + '</span><span class="home-s">Bald</span></div>';
           }
           return '<a class="home-tile" href="' + t.href + '">' + icon(t.icon, 30) + '<span class="home-t">' + esc(t.title) + '</span><span class="home-s">' + esc(t.sub(c)) + '</span></a>';
-        }).join('') + '</div></div>';
+        }).join('') + '</div><p class="muted small center top16">Version ' + APP_VERSION + '</p></div>';
     });
   }
 
@@ -771,6 +790,7 @@
       var stale = all.length && (!last || Date.now() - new Date(last) > 30 * 864e5);
       el.screen.innerHTML =
         '<div class="page"><h1 class="big">Klüfte</h1>' +
+        '<a class="btn dark wide kmap" href="#/kluftkarte">' + icon('map', 20) + '<span>Kluftkarte</span></a>' +
         (stale ? '<a class="warn" href="#/mehr">' + (last ? 'Letztes Backup ist über 30 Tage alt.' : 'Noch kein Backup gemacht.') + ' Jetzt sichern</a>' : '') +
         '<label class="search">' + icon('search', 20) + '<input id="q" type="search" aria-label="Klüfte suchen" placeholder="Name, Mineral, Gebiet" value="' + esc(state.search) + '"></label>' +
         '<div class="chips scroll">' + ['Alle'].concat(STATUS).map(function (s) {
@@ -845,6 +865,7 @@
         '<section><h2>Sicherung</h2><p class="muted small">Deine Daten liegen nur auf diesem iPhone. Sichere sie regelmässig, zum Beispiel in iCloud Drive.</p>' +
         '<div class="cell"><div class="label">Letztes Backup</div><div class="value-s">' + (last ? fmtDate(last) : 'Noch keines') + ' · ' + r[2].length + ' Klüfte, ' + r[3].length + ' Funde</div></div>' +
         '<div class="grid2 top8"><button class="btn dark" data-act="backup">Backup erstellen</button><button class="btn" data-act="restore">Einspielen</button></div></section>' +
+        '<section><h2>Tour</h2><button class="btn wide" data-act="tour">Rückmeldezeit setzen</button></section>' +
         '<section><h2>Privatsphäre</h2><button class="btn wide" data-act="tarn">' + (state.tarn ? 'Tarnmodus ausschalten' : 'Tarnmodus einschalten') + '</button>' +
         '<p class="muted small top8">Der Tarnmodus blendet Fundpunkte aus und sperrt die Koordinaten. Die Daten selbst schützt die Sperre deines iPhones.</p></section>' +
         '<section><h2>App</h2><div class="cell"><div class="label">Speicher belegt</div><div class="value-s" id="usage">…</div></div>' +
@@ -1035,6 +1056,10 @@
     navigator.serviceWorker.register('sw.js').then(function (reg) {
       state.reg = reg;
       if (reg.waiting && navigator.serviceWorker.controller) showUpdate();
+      state.reg.update().catch(function () {});
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && navigator.onLine) reg.update().catch(function () {});
+      });
       reg.addEventListener('updatefound', function () {
         var w = reg.installing;
         if (!w) return;
@@ -1243,7 +1268,7 @@
       if (state.tarn) { toast('Im Tarnmodus gesperrt.'); return; }
       DB.get('klufte', n.getAttribute('data-id')).then(function (k) {
         initMap();
-        location.hash = '#/karte';
+        location.hash = '#/kluftkarte';
         el.mapView.hidden = false;
         state.map.setView(k.lat, k.lon, 15);
       });
@@ -1346,7 +1371,8 @@
     var path = (location.hash || '#/start').replace(/^#\/?/, '');
     var p = path.split('/');
     var r = p[0] || 'start';
-    var isMap = r === 'karte';
+    var isMap = r === 'karte' || r === 'kluftkarte';
+    state.mapMode = r;
 
     if (!isMap && r !== 'neu' && r !== 'bearbeiten' && r !== 'fund' && state.draft && !state.pick) state.draft = null;
     if (!isMap && state.map) {
@@ -1359,7 +1385,7 @@
     var form = r === 'neu' || r === 'bearbeiten' || r === 'fund' || state.pick;
     el.tabs.hidden = !!form;
     document.body.classList.toggle('with-tabs', !form);
-    if (!form) renderTabs(r === 'kluft' ? 'kluefte' : r);
+    if (!form) renderTabs(r === 'kluft' || r === 'kluftkarte' ? 'kluefte' : r);
     if (!isMap) window.scrollTo(0, 0);
 
     if (isMap) return renderMap();

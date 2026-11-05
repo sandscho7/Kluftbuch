@@ -1,6 +1,6 @@
 // Bei jeder Änderung an der App VERSION erhöhen. Die Daten liegen in IndexedDB
 // und die Karten in TILE_CACHE, beides bleibt bei einem Update unangetastet.
-var VERSION = '1.3.0';
+var VERSION = '1.4.0';
 var APP_CACHE = 'kb-app-' + VERSION;
 var TILE_CACHE = 'kb-tiles-v1';
 var SHELL = [
@@ -10,7 +10,10 @@ var SHELL = [
 ];
 
 self.addEventListener('install', function (e) {
-  e.waitUntil(caches.open(APP_CACHE).then(function (c) { return c.addAll(SHELL); }));
+  // cache: 'reload' umgeht den Browser-Cache, sonst landen alte Dateien in der neuen Version.
+  e.waitUntil(caches.open(APP_CACHE).then(function (c) {
+    return c.addAll(SHELL.map(function (u) { return new Request(u, { cache: 'reload' }); }));
+  }));
 });
 
 self.addEventListener('activate', function (e) {

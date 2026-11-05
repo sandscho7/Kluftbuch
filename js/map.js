@@ -6,7 +6,7 @@ function TileMap(el, opts) {
   var cx = Geo.lon2x(8.2), cy = Geo.lat2y(46.38), zoom = 12;
   var tiles = {};
   var pointers = {};
-  var pinch = null, moved = false, lastTap = 0, tapTimer = null;
+  var pinch = null, moved = false, lastTap = 0, tapTimer = null, downX = 0, downY = 0;
   var scheduled = false;
 
   var tileLayer = document.createElement('div');
@@ -155,6 +155,7 @@ function TileMap(el, opts) {
     el.setPointerCapture(e.pointerId);
     pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
     moved = false;
+    downX = e.clientX; downY = e.clientY;
     var p = pts();
     if (p.length === 2) {
       pinch = {
@@ -168,7 +169,7 @@ function TileMap(el, opts) {
     var cur = pointers[e.pointerId];
     if (!cur) return;
     var dx = e.clientX - cur.x, dy = e.clientY - cur.y;
-    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+    if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 12) moved = true;
     var rect = el.getBoundingClientRect();
     if (pinch && pts().length >= 2) {
       cur.x = e.clientX; cur.y = e.clientY;

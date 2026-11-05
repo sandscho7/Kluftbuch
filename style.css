@@ -198,3 +198,5 @@ body:not(.with-tabs) #map-sheet { padding-bottom: calc(16px + env(safe-area-inse
 .geo-item dt { font-size: 12px; color: var(--muted2); }
 .geo-item dd { margin: 0 0 8px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .geo-item dd:last-child { margin-bottom: 0; }
+.kmap { gap: 8px; margin-bottom: 12px; }
+.top16 { margin-top: 16px; }
