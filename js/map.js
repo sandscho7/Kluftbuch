@@ -9,11 +9,18 @@ function TileMap(el, opts) {
   var pinch = null, moved = false, lastTap = 0, tapTimer = null, downX = 0, downY = 0;
   var scheduled = false;
 
+  var marks = [], draw = null, stroke = null;
+  var STROKE_PX = 26;
+
   var tileLayer = document.createElement('div');
   tileLayer.className = 'tile-layer';
   var markerLayer = document.createElement('div');
   markerLayer.className = 'marker-layer';
+  var canvas = document.createElement('canvas');
+  canvas.className = 'mark-layer';
+  var ctx = canvas.getContext('2d');
   el.appendChild(tileLayer);
+  el.appendChild(canvas);
   el.appendChild(markerLayer);
 
   var markers = [];
@@ -31,6 +38,53 @@ function TileMap(el, opts) {
   function screen(lat, lon) {
     var s = size(), w = worldPx();
     return { x: (Geo.lon2x(lon) - cx) * w + s.w / 2, y: (Geo.lat2y(lat) - cy) * w + s.h / 2 };
+  }
+
+  function toWorld(clientX, clientY) {
+    var r = el.getBoundingClientRect(), s = size(), w = worldPx();
+    return [cx + (clientX - r.left - s.w / 2) / w, cy + (clientY - r.top - s.h / 2) / w];
+  }
+
+  function paintMarks() {
+    var s = size(), dpr = window.devicePixelRatio || 1, w = worldPx();
+    var pw = Math.round(s.w * dpr), ph = Math.round(s.h * dpr);
+    if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, s.w, s.h);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    (stroke ? marks.concat([stroke]) : marks).forEach(function (m) {
+      ctx.strokeStyle = m.color;
+      ctx.lineWidth = Math.max(3, m.w * w);
+      ctx.beginPath();
+      m.pts.forEach(function (p, i) {
+        var x = (p[0] - cx) * w + s.w / 2, y = (p[1] - cy) * w + s.h / 2;
+        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      });
+      if (m.pts.length === 1) ctx.lineTo((m.pts[0][0] - cx) * w + s.w / 2 + 0.1, (m.pts[0][1] - cy) * w + s.h / 2);
+      ctx.stroke();
+    });
+  }
+
+  function segDist(px, py, ax, ay, bx, by) {
+    var dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy;
+    var t = l ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l)) : 0;
+    return Math.hypot(px - ax - t * dx, py - ay - t * dy);
+  }
+
+  function hitMark(clientX, clientY) {
+    var r = el.getBoundingClientRect(), s = size(), w = worldPx();
+    var px = clientX - r.left, py = clientY - r.top;
+    var sx = function (p) { return (p[0] - cx) * w + s.w / 2; };
+    var sy = function (p) { return (p[1] - cy) * w + s.h / 2; };
+    for (var i = marks.length - 1; i >= 0; i--) {
+      var m = marks[i], lim = Math.max(18, m.w * w / 2);
+      for (var j = 0; j < m.pts.length; j++) {
+        var a = m.pts[j], b = m.pts[Math.min(j + 1, m.pts.length - 1)];
+        if (segDist(px, py, sx(a), sy(a), sx(b), sy(b)) <= lim) return m;
+      }
+    }
+    return null;
   }
 
   function makeTile(z, x, y) {
@@ -124,6 +178,7 @@ function TileMap(el, opts) {
       var t = screen(tapMark.lat, tapMark.lon);
       tapMark.el.style.transform = 'translate3d(' + t.x + 'px,' + t.y + 'px,0)';
     }
+    paintMarks();
     if (opts.onMove) opts.onMove();
   }
 
@@ -157,6 +212,11 @@ function TileMap(el, opts) {
     moved = false;
     downX = e.clientX; downY = e.clientY;
     var p = pts();
+    stroke = null;
+    if (draw && !draw.erase && p.length === 1) {
+      var st = toWorld(e.clientX, e.clientY);
+      stroke = { color: draw.color, w: STROKE_PX / worldPx(), pts: [st] };
+    }
     if (p.length === 2) {
       pinch = {
         d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y),
@@ -171,6 +231,14 @@ function TileMap(el, opts) {
     var dx = e.clientX - cur.x, dy = e.clientY - cur.y;
     if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 12) moved = true;
     var rect = el.getBoundingClientRect();
+    if (stroke && pts().length === 1) {
+      if (Math.abs(dx) + Math.abs(dy) >= 3) {
+        cur.x = e.clientX; cur.y = e.clientY;
+        stroke.pts.push(toWorld(e.clientX, e.clientY));
+        schedule();
+      }
+      return;
+    }
     if (pinch && pts().length >= 2) {
       cur.x = e.clientX; cur.y = e.clientY;
       var p = pts();
@@ -190,6 +258,23 @@ function TileMap(el, opts) {
     if (!pointers[e.pointerId]) return;
     delete pointers[e.pointerId];
     if (pts().length < 2) pinch = null;
+    if (stroke) {
+      var done = stroke;
+      stroke = null;
+      if (e.type === 'pointerup' && opts.onStroke) {
+        done.pts = done.pts.map(function (q) { return [+q[0].toFixed(9), +q[1].toFixed(9)]; });
+        opts.onStroke(done);
+      }
+      schedule();
+      return;
+    }
+    if (draw) {
+      if (draw.erase && !moved && e.type === 'pointerup') {
+        var hit = hitMark(e.clientX, e.clientY);
+        if (hit && opts.onErase) opts.onErase(hit);
+      }
+      return;
+    }
     if (!moved && e.type === 'pointerup') {
       var now = Date.now();
       var r = el.getBoundingClientRect();
@@ -219,6 +304,8 @@ function TileMap(el, opts) {
   }, { passive: false });
 
   this.refresh = schedule;
+  this.setMarks = function (list) { marks = list; schedule(); };
+  this.setDraw = function (d) { draw = d; stroke = null; };
   this.setOverlays = function (list) {
     var ids = list.map(function (o) { return o.id; });
     overlays = overlays.filter(function (ov) {
@@ -231,7 +318,7 @@ function TileMap(el, opts) {
       var d = document.createElement('div');
       d.className = 'tile-layer';
       d.style.opacity = o.opacity;
-      el.insertBefore(d, markerLayer);
+      el.insertBefore(d, canvas);
       overlays.push({ id: o.id, urls: o.urls, el: d, tiles: {} });
     });
     schedule();

@@ -20,12 +20,17 @@
     { title: 'Einstellungen', icon: 'sliders', href: '#/mehr', sub: function () { return 'Karten, Backup, Tarnmodus'; } }
   ];
 
-  var APP_VERSION = '1.4.0';
+  var APP_VERSION = '1.5.0';
+  var MARK_COLORS = [
+    { name: 'Gelb', hex: '#FFE600' }, { name: 'Orange', hex: '#FF8A00' }, { name: 'Pink', hex: '#FF3D9A' },
+    { name: 'Grün', hex: '#37D67A' }, { name: 'Blau', hex: '#2AA9FF' }
+  ];
   var GEO_API = 'https://api3.geo.admin.ch/rest/services/ech/MapServer/';
   var LEGEND = 'https://api3.geo.admin.ch/static/images/legends/ch.swisstopo.hangneigung-ueber_30_';
   var SNOW_URL = 'https://whiterisk.ch/de/conditions/snow-maps/snow_depth';
 
   var ICONS = {
+    pen: '<path d="M4 20l1-5L16 4l4 4L9 19l-5 1z"/><path d="M13.500 6.500l4 4"/>',
     home: '<path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/>',
     cloud: '<path d="M7 18a4 4 0 0 1-.5-8 5.500 5.500 0 0 1 10.600-1.200A4.500 4.500 0 0 1 17 18H7z"/>',
     sliders: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
@@ -50,7 +55,7 @@
   };
 
   var state = {
-    tarn: false, overlays: [], tour: null, pos: null, watchId: null, map: null, lastBounds: null,
+    tarn: false, overlays: [], marks: [], draw: null, drawColor: MARK_COLORS[0].hex, tour: null, pos: null, watchId: null, map: null, lastBounds: null,
     draft: null, pick: null, filter: 'Alle', search: '', fsearch: '', reveal: {},
     dl: null, reg: null, updateReady: false, recorder: null, inited: false
   };
@@ -217,11 +222,43 @@
       },
       onTap: function (lat, lon) {
         if (!state.pick && state.overlays.indexOf('geologie') >= 0) identifyGeology(lat, lon);
+      },
+      onStroke: function (s) {
+        s.id = DB.uid();
+        state.marks.push(s);
+        saveMarks();
+      },
+      onErase: function (m) {
+        state.marks = state.marks.filter(function (x) { return x.id !== m.id; });
+        saveMarks();
       }
     });
     DB.meta('mapView', null).then(function (v) {
       if (v) state.map.setView(v.lat, v.lon, v.zoom);
     });
+  }
+
+  function saveMarks() {
+    state.map.setMarks(state.marks);
+    DB.setMeta('marks', state.marks).then(askPersist);
+    var u = $('[data-act=draw-undo]');
+    if (u) u.disabled = !state.marks.length;
+  }
+
+  function stopDraw() {
+    state.draw = null;
+    if (state.map) state.map.setDraw(null);
+  }
+
+  function drawBar() {
+    var d = state.draw;
+    return '<div class="swatches">' + MARK_COLORS.map(function (c) {
+      var on = !d.erase && d.color === c.hex;
+      return '<button class="swatch' + (on ? ' on' : '') + '" style="background:' + c.hex + '" aria-label="' + c.name + '" aria-pressed="' + on + '" data-act="draw-color" data-val="' + c.hex + '"></button>';
+    }).join('') + '</div><div class="grid3">' +
+      '<button class="seg' + (d.erase ? ' on' : '') + '" aria-pressed="' + !!d.erase + '" data-act="draw-erase">Radierer</button>' +
+      '<button class="seg" data-act="draw-undo"' + (state.marks.length ? '' : ' disabled') + '>Zurück</button>' +
+      '<button class="seg dark" data-act="draw-done">Fertig</button></div>';
   }
 
   function renderLegend() {
@@ -353,6 +390,8 @@
         (kluftMode ? '<button class="map-btn' + (state.tarn ? ' on' : '') + '" data-act="tarn" aria-pressed="' + state.tarn + '" aria-label="Tarnmodus, Fundpunkte ausblenden">' + icon(state.tarn ? 'eyeoff' : 'eye') + '</button>' : '') +
         '<a class="map-btn" href="#/mehr" aria-label="Offline-Karten verwalten">' + icon('layers') + '</a>';
 
+      var mainMode = state.mapMode === 'karte';
+      state.map.setMarks(mainMode ? state.marks : []);
       state.map.setOverlays(Geo.OVERLAYS.filter(function (o) { return state.overlays.indexOf(o.id) >= 0; }));
       el.layers.innerHTML = Geo.OVERLAYS.map(function (o) {
         var on = state.overlays.indexOf(o.id) >= 0;
@@ -362,10 +401,13 @@
       el.tools.innerHTML =
         '<button class="map-btn" data-act="zoom-in" aria-label="Hineinzoomen">' + icon('plus') + '</button>' +
         '<button class="map-btn" data-act="zoom-out" aria-label="Herauszoomen">' + icon('minus') + '</button>' +
-        '<button class="map-btn' + (state.watchId != null ? ' on' : '') + '" data-act="locate" aria-label="Mein Standort">' + icon('locate') + '</button>';
+        '<button class="map-btn' + (state.watchId != null ? ' on' : '') + '" data-act="locate" aria-label="Mein Standort">' + icon('locate') + '</button>' +
+        (mainMode && !state.pick ? '<button class="map-btn' + (state.draw ? ' on' : '') + '" data-act="draw-toggle" aria-pressed="' + !!state.draw + '" aria-label="Leuchtstift">' + icon('pen') + '</button>' : '');
 
-      el.sheet.hidden = !kluftMode && !state.pick;
-      if (!kluftMode && !state.pick) {
+      el.sheet.hidden = !kluftMode && !state.pick && !state.draw;
+      if (state.draw) {
+        el.sheet.innerHTML = drawBar();
+      } else if (!kluftMode && !state.pick) {
         el.sheet.innerHTML = '';
       } else if (state.pick) {
         el.sheet.innerHTML = '<div class="row2"><button class="btn" data-act="pick-cancel">Abbrechen</button><button class="btn primary" data-act="pick-ok">Punkt setzen</button></div>';
@@ -1013,7 +1055,7 @@
       if (!f) return;
       f.text().then(function (t) { return DB.importData(JSON.parse(t)); }).then(function (n) {
         toast(n + ' neue Einträge eingespielt');
-        route();
+        return DB.meta('marks', []).then(function (m) { state.marks = m; route(); });
       }).catch(function (e) { toast(e.message || 'Backup konnte nicht gelesen werden.'); });
     };
     i.click();
@@ -1089,6 +1131,34 @@
       var src = n.querySelector('img').src;
       el.light.innerHTML = '<img class="legend-big" src="' + esc(src) + '" alt="Legende Steilheit"><button class="square" data-act="light-close" aria-label="Schliessen">' + icon('close') + '</button>';
       el.light.hidden = false;
+    },
+    'draw-toggle': function () {
+      if (state.draw) stopDraw();
+      else {
+        state.draw = { color: state.drawColor };
+        state.map.setDraw(state.draw);
+        toast('Mit einem Finger markieren, mit zwei Fingern die Karte zoomen.');
+      }
+      renderMap();
+    },
+    'draw-color': function (n) {
+      state.drawColor = n.getAttribute('data-val');
+      state.draw = { color: state.drawColor };
+      state.map.setDraw(state.draw);
+      renderMap();
+    },
+    'draw-erase': function () {
+      state.draw = state.draw.erase ? { color: state.drawColor } : { color: state.drawColor, erase: true };
+      state.map.setDraw(state.draw);
+      renderMap();
+    },
+    'draw-undo': function () {
+      state.marks.pop();
+      saveMarks();
+    },
+    'draw-done': function () {
+      stopDraw();
+      renderMap();
     },
     'zoom-in': function () { state.map.zoomBy(1); },
     'zoom-out': function () { state.map.zoomBy(-1); },
@@ -1373,6 +1443,7 @@
     var r = p[0] || 'start';
     var isMap = r === 'karte' || r === 'kluftkarte';
     state.mapMode = r;
+    if (r !== 'karte') stopDraw();
 
     if (!isMap && r !== 'neu' && r !== 'bearbeiten' && r !== 'fund' && state.draft && !state.pick) state.draft = null;
     if (!isMap && state.map) {
@@ -1450,10 +1521,11 @@
     if (!document.hidden && !el.mapView.hidden) renderMap();
   });
 
-  Promise.all([DB.meta('tarn', false), DB.meta('tour', null), DB.meta('overlays', [])]).then(function (r) {
+  Promise.all([DB.meta('tarn', false), DB.meta('tour', null), DB.meta('overlays', []), DB.meta('marks', [])]).then(function (r) {
     state.tarn = r[0];
     state.tour = r[1];
     state.overlays = r[2];
+    state.marks = r[3];
     initSW();
     route();
   }).catch(function () {

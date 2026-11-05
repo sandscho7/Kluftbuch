@@ -121,6 +121,13 @@ var DB = (function () {
       return meta('kluftCounter', 0).then(function (n) {
         return setMeta('kluftCounter', Math.max(n, incoming ? incoming.value : 0));
       });
+    }).then(function () {
+      var inc = (data.meta || []).filter(function (m) { return m.id === 'marks'; })[0];
+      if (!inc) return null;
+      return meta('marks', []).then(function (cur) {
+        var ids = cur.map(function (m) { return m.id; });
+        return setMeta('marks', cur.concat((inc.value || []).filter(function (m) { return ids.indexOf(m.id) < 0; })));
+      });
     }).then(function () { return added; });
   }
 
