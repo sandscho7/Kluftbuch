@@ -20,7 +20,7 @@
     { title: 'Einstellungen', icon: 'sliders', href: '#/mehr', sub: function () { return 'Karten, Backup, Tarnmodus'; } }
   ];
 
-  var APP_VERSION = '1.5.0';
+  var APP_VERSION = '1.5.1';
   var MARK_COLORS = [
     { name: 'Gelb', hex: '#FFE600' }, { name: 'Orange', hex: '#FF8A00' }, { name: 'Pink', hex: '#FF3D9A' },
     { name: 'Grün', hex: '#37D67A' }, { name: 'Blau', hex: '#2AA9FF' }
@@ -391,7 +391,7 @@
         '<a class="map-btn" href="#/mehr" aria-label="Offline-Karten verwalten">' + icon('layers') + '</a>';
 
       var mainMode = state.mapMode === 'karte';
-      state.map.setMarks(mainMode ? state.marks : []);
+      state.map.setMarks(mainMode && state.draw ? state.marks : []);
       state.map.setOverlays(Geo.OVERLAYS.filter(function (o) { return state.overlays.indexOf(o.id) >= 0; }));
       el.layers.innerHTML = Geo.OVERLAYS.map(function (o) {
         var on = state.overlays.indexOf(o.id) >= 0;
